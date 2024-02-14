@@ -40,9 +40,13 @@ def get_default_font_properties():
 
 
 def _get_supported_image_file_formats():
+    import itertools
     from matplotlib.backend_bases import FigureCanvasBase
+    from yt.visualization.exr_writer import OpenEXRCanvas
 
-    return frozenset(FigureCanvasBase.get_supported_filetypes().keys())
+    return frozenset(itertools.chain(
+        FigureCanvasBase.get_supported_filetypes().keys(),
+        OpenEXRCanvas.get_supported_filetypes().keys()))
 
 
 def _get_supported_canvas_classes():
@@ -50,9 +54,11 @@ def _get_supported_canvas_classes():
     from matplotlib.backends.backend_pdf import FigureCanvasPdf
     from matplotlib.backends.backend_ps import FigureCanvasPS
     from matplotlib.backends.backend_svg import FigureCanvasSVG
+    from yt.visualization.exr_writer import OpenEXRCanvas
 
     return frozenset(
-        (FigureCanvasAgg, FigureCanvasPdf, FigureCanvasPS, FigureCanvasSVG)
+        (FigureCanvasAgg, FigureCanvasPdf, FigureCanvasPS, FigureCanvasSVG,
+         OpenEXRCanvas)
     )
 
 

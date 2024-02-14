@@ -247,6 +247,7 @@ def lines(np.float64_t[:,:,:] image,
 @cython.cdivision(True)
 def zlines(np.ndarray[np.float64_t, ndim=3] image,
         np.ndarray[np.float64_t, ndim=2] zbuffer,
+        np.ndarray[np.float64_t, ndim=2] zbuffer_transparent,
         np.ndarray[np.int64_t, ndim=1] xs,
         np.ndarray[np.int64_t, ndim=1] ys,
         np.ndarray[np.float64_t, ndim=1] zs,
@@ -322,6 +323,8 @@ def zlines(np.ndarray[np.float64_t, ndim=3] image,
                             if (1.0 - image[x0, yi0, 3] < 1.0e-4):
                                 image[x0, yi0, 3] = 1.0
                                 zbuffer[x0, yi0] = z0
+                        if z0 < zbuffer_transparent[x0, yi0]:
+                            zbuffer_transparent[x0, yi0] = z0
 
             if (x0 == x1 and y0 == y1):
                 break
@@ -342,6 +345,7 @@ def zlines(np.ndarray[np.float64_t, ndim=3] image,
 @cython.cdivision(True)
 def zpoints(np.ndarray[np.float64_t, ndim=3] image,
         np.ndarray[np.float64_t, ndim=2] zbuffer,
+        np.ndarray[np.float64_t, ndim=2] zbuffer_transparent,
         np.ndarray[np.int64_t, ndim=1] xs,
         np.ndarray[np.int64_t, ndim=1] ys,
         np.ndarray[np.float64_t, ndim=1] zs,
@@ -398,6 +402,8 @@ def zpoints(np.ndarray[np.float64_t, ndim=3] image,
                             image[x0, yi0, i] = alpha[i]
                     if (1.0 - image[x0, yi0, 3] < 1.0e-4):
                         zbuffer[x0, yi0] = z0
+                if z0 < zbuffer_transparent[x0, yi0]:
+                    zbuffer_transparent[x0, yi0] = z0
     return
 
 

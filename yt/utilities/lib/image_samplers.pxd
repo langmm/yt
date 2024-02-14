@@ -32,6 +32,7 @@ ctypedef void generate_vector_info_function(ImageSampler im,
 
 cdef struct ImageAccumulator:
     np.float64_t rgba[Nch]
+    np.float64_t zt
     void *supp_data
 
 cdef class ImageSampler:
@@ -40,6 +41,7 @@ cdef class ImageSampler:
     cdef np.float64_t *center
     cdef np.float64_t[:,:,:] image
     cdef np.float64_t[:,:] zbuffer
+    cdef np.float64_t[:,:] zbuffer_transparent
     cdef np.int64_t[:,:] image_used
     cdef np.int64_t[:,:] mesh_lines
     cdef np.float64_t pdx, pdy
@@ -49,7 +51,7 @@ cdef class ImageSampler:
     cdef np.float64_t *x_vec
     cdef np.float64_t *y_vec
     cdef public object acenter, aimage, ax_vec, ay_vec
-    cdef public object azbuffer
+    cdef public object azbuffer, azbuffer_transparent
     cdef public object aimage_used
     cdef public object amesh_lines
     cdef void *supp_data

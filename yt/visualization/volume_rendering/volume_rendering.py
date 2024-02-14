@@ -91,8 +91,10 @@ def volume_render(
         values for that given field, and the field will be logarithmically
         scaled if the field_info object specifies as such.
     fname: string, optional
-        If specified, the resulting rendering will be saved to this filename
-        in png format.
+        If specified, the resulting rendering will be saved to this filename.
+        The file format is inferred from the suffix. Supported formats
+        depend on which version of matplotlib is installed and if OpenEXR
+        is installed.
     sigma_clip: float, optional
         If specified, the resulting image will be clipped before saving,
         using a threshold based on sigma_clip multiplied by the standard

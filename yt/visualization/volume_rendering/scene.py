@@ -289,7 +289,8 @@ class Scene:
             If specified, save the rendering as to the file "fname".
             If unspecified, it creates a default based on the dataset filename.
             The file format is inferred from the filename's suffix.
-            Supported formats depend on which version of matplotlib is installed.
+            Supported formats depend on which version of matplotlib is
+            installed and if OpenEXR is installed.
 
             Default: None
         sigma_clip: float, optional
@@ -338,6 +339,10 @@ class Scene:
         # matplotlib.
         if fname.endswith(".png"):
             self._last_render.write_png(fname, sigma_clip=sigma_clip)
+        elif fname.endswith(".exr"):
+            # TODO:
+            # - pass user-supplied channels/fields?
+            self.save_exr(fname=fname, sigma_clip=sigma_clip, scale=True)
         else:
             from matplotlib.figure import Figure
 
@@ -577,6 +582,115 @@ class Scene:
         for source in self.sources.values():
             source._validate()
         return
+
+    def save_exr(
+        self,
+        fname: Optional[str] = None,
+        camera=None,
+        sigma_clip: Optional[float] = None,
+        channels: Optional[list[str]] = None,
+        composite: Optional[bool] = False,
+        scale: Optional[bool] = False,
+    ):
+        r"""Saves sources in the Scene to an OpenEXR file with
+        samples for each source in the desired channels.
+
+        Parameters
+        ----------
+        fname: string, optional
+            If specified, save the rendering as to the file "fname".
+            If unspecified, it creates a default based on the dataset
+            filename.
+            Default: None
+        camera: :class:`Camera`, optional
+            If specified, use a different :class:`Camera` to render the
+            scene.
+        sigma_clip: float, optional
+            Image values greater than this number times the standard
+            deviation plus the mean of the image will be clipped before
+            saving. Useful for enhancing images as it gets rid of rare
+            high pixel values.
+            Default: None
+
+            floor(vals > std_dev*sigma_clip + mean)
+        channels: sequence of strings, optional
+            Names of fields that should be written out as channels. If
+            not provided, R, G, B, A, & Z (depth) will be written.
+        composite: bool, optional
+            If True, the composite image for all sources in the scene
+            will be saved. If False (the default), sources will be
+            added as separate channels in the image.
+        scale: bool, optional
+            If True, the image values in each channel will be scaled to
+            0-255. If False (the default), the raw channel data will be
+            returned.
+
+        """
+        from yt.visualization.exr_writer import OpenEXRCanvas
+        if camera is None:
+            camera = self.camera
+        if channels is None:
+            channels = ['R', 'G', 'B', 'A', 'Z']
+        # TODO:
+        # - User supplied set of channels to output?
+        # - Is this the correct depth of sources?
+        empty = camera.lens.new_image(camera)
+        exr = OpenEXRCanvas(empty.shape[:2])
+        kws = {}
+
+        def add_channels(im, z, prefix=""):
+            if scale:
+                max_z = 1.0
+                z_mask = (z != np.inf)
+                if sigma_clip is not None:
+                    max_im = im._clipping_value(sigma_clip)
+                    if z_mask.any():
+                        max_z = max(z[z_mask].max(), 1.0)
+                else:
+                    max_im = im[:, :, :3].max()
+                    if z_mask.any():
+                        max_z = max(z[z_mask].max(), 1.0)
+                alpha = im[:, :, 3]
+                im = im[:, :, :3]
+                if max_im != 0:
+                    im = np.clip(im[:, :, :3] / max_im, 0.0, 1.0)
+                if max_z != 0:
+                    z = np.clip(z / max_z, 0.0, 1.0)
+                im = np.concatenate([im, alpha[..., None]], axis=-1)
+            for i, name in enumerate("RGBA"):
+                exr.add_channel(f"{prefix}{name}", im[:, :, i])
+            exr.add_channel(f"{prefix}Z", z)
+
+        def new_zbuffer():
+            empty = camera.lens.new_image(camera)
+            z = np.empty(empty.shape[:2], dtype="float64")
+            z[:] = np.inf
+            return ZBuffer(empty, z)
+
+        if composite:
+            kws['zbuffer'] = new_zbuffer()
+        for k, source in self.opaque_sources:
+            if not composite:
+                kws['zbuffer'] = new_zbuffer()
+            source.render(camera, **kws)
+            im = source.zbuffer.rgba
+            z = source.zbuffer.z_transparent
+            if not composite:
+                add_channels(im, z, prefix=f"{k}.")
+        for k, source in self.transparent_sources:
+            if not composite:
+                kws['zbuffer'] = new_zbuffer()
+            im = source.render(camera, **kws)
+            z = source.sampler.azbuffer_transparent
+            if composite:
+                kws['zbuffer'].rgba = im
+            else:
+                add_channels(im, z, prefix=f"{k}.")
+        if composite:
+            im = kws['zbuffer'].rgba
+            z = kws['zbuffer'].z_transparent
+            add_channels(im, z)
+        exr.write(fname)
 
     def composite(self, camera=None):
         r"""Create a composite image of the current scene.

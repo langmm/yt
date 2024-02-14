@@ -888,7 +888,9 @@ class MeshSource(OpaqueSource):
             z[:] = np.inf
             zbuffer = ZBuffer(empty, z)
         elif zbuffer.rgba.shape != shape:
-            zbuffer = ZBuffer(zbuffer.rgba.reshape(shape), zbuffer.z.reshape(shape[:2]))
+            zbuffer = ZBuffer(zbuffer.rgba.reshape(shape),
+                              zbuffer.z.reshape(shape[:2]),
+                              zbuffer.z_transparent.reshape(shape[:2]))
         self.zbuffer = zbuffer
 
         self.sampler = new_mesh_sampler(camera, self, engine=self.engine)
@@ -900,7 +902,9 @@ class MeshSource(OpaqueSource):
         self.finalize_image(camera)
         self.current_image = self.apply_colormap()
 
-        zbuffer += ZBuffer(self.current_image.astype("float64"), self.sampler.azbuffer)
+        zbuffer += ZBuffer(self.current_image.astype("float64"),
+                           self.sampler.azbuffer,
+                           self.sampler.azbuffer_transparent)
         zbuffer.rgba = ImageArray(zbuffer.rgba)
         self.zbuffer = zbuffer
         self.current_image = self.zbuffer.rgba
@@ -1089,7 +1093,8 @@ class PointSource(OpaqueSource):
         camera.lens.setup_box_properties(camera)
         px, py, dz = camera.lens.project_to_plane(camera, vertices)
 
-        zpoints(empty, z, px, py, dz, self.colors, self.radii, self.color_stride)
+        zpoints(empty, z, zbuffer.z_transparent,
+                px, py, dz, self.colors, self.radii, self.color_stride)
 
         self.zbuffer = zbuffer
         return zbuffer
@@ -1218,7 +1223,9 @@ class LineSource(OpaqueSource):
 
         if len(px.shape) == 1:
             zlines(
-                empty, z, px, py, dz, self.colors.astype("float64"), self.color_stride
+                empty, z, zbuffer.z_transparent,
+                px, py, dz, self.colors.astype("float64"),
+                self.color_stride
             )
         else:
             # For stereo-lens, two sets of pos for each eye are contained
@@ -1226,6 +1233,7 @@ class LineSource(OpaqueSource):
             zlines(
                 empty,
                 z,
+                zbuffer.z_transparent,
                 px[0, :],
                 py[0, :],
                 dz[0, :],
@@ -1235,6 +1243,7 @@ class LineSource(OpaqueSource):
             zlines(
                 empty,
                 z,
+                zbuffer.z_transparent,
                 px[1, :],
                 py[1, :],
                 dz[1, :],
@@ -1555,7 +1564,9 @@ class CoordinateVectorSource(OpaqueSource):
 
         if len(px.shape) == 1:
             zlines(
-                empty, z, px, py, dz, self.colors.astype("float64"), thick=self.thick
+                empty, z, zbuffer.z_transparent,
+                px, py, dz, self.colors.astype("float64"),
+                thick=self.thick
             )
         else:
             # For stereo-lens, two sets of pos for each eye are contained
@@ -1563,6 +1574,7 @@ class CoordinateVectorSource(OpaqueSource):
             zlines(
                 empty,
                 z,
+                zbuffer.z_transparent,
                 px[0, :],
                 py[0, :],
                 dz[0, :],
@@ -1572,6 +1584,7 @@ class CoordinateVectorSource(OpaqueSource):
             zlines(
                 empty,
                 z,
+                zbuffer.z_transparent,
                 px[1, :],
                 py[1, :],
                 dz[1, :],

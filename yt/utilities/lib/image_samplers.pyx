@@ -82,6 +82,10 @@ cdef class ImageSampler:
         if zbuffer is None:
             zbuffer = np.ones((image.shape[0], image.shape[1]), "float64")
 
+        zbuffer_transparent = kwargs.pop("zbuffer_transparent", None)
+        if zbuffer_transparent is None:
+            zbuffer_transparent = np.full((image.shape[0], image.shape[1]), np.inf)
+
         image_used = np.zeros((image.shape[0], image.shape[1]), "int64")
         mesh_lines = np.zeros((image.shape[0], image.shape[1]), "int64")
 
@@ -119,7 +123,9 @@ cdef class ImageSampler:
         self.ay_vec = y_vec
         self.y_vec = <np.float64_t *> y_vec.data
         self.zbuffer = zbuffer
+        self.zbuffer_transparent = zbuffer_transparent
         self.azbuffer = np.asarray(zbuffer)
+        self.azbuffer_transparent = np.asarray(zbuffer_transparent)
         self.image_used = image_used
         self.aimage_used = np.asarray(image_used)
         self.mesh_lines = mesh_lines
@@ -186,6 +192,7 @@ cdef class ImageSampler:
                 for i in range(Nch):
                     idata.rgba[i] = self.image[vi, vj, i]
                 max_t = fclip(self.zbuffer[vi, vj], 0.0, 1.0)
+                idata.zt = self.zbuffer_transparent[vi, vj]
                 walk_volume(vc, v_pos, v_dir, self.sample,
                             (<void *> idata), NULL, max_t)
                 if (j % (10*chunksize)) == 0:
@@ -193,6 +200,7 @@ cdef class ImageSampler:
                         PyErr_CheckSignals()
                 for i in range(Nch):
                     self.image[vi, vj, i] = idata.rgba[i]
+                self.zbuffer_transparent[vi, vj] = idata.zt
             idata.supp_data = NULL
             free(idata)
             free(v_pos)
@@ -260,6 +268,7 @@ cdef class ImageSampler:
 
                 for i in range(Nch):
                     idata.rgba[i] = self.image[vi, vj, i]
+                idata.zt = self.zbuffer_transparent[vi, vj]
                 for i in range(8):
                     vc.mask[i] = 1
 
@@ -287,6 +296,7 @@ cdef class ImageSampler:
                         )
                 for i in range(Nch):
                     self.image[vi, vj, i] = idata.rgba[i]
+                self.zbuffer_transparent[vi, vj] = idata.zt
 
                 # Empty keys and t
                 ri.keys.clear()
@@ -486,6 +496,9 @@ cdef class VolumeRenderSampler(ImageSampler):
                         vc.data[j] + offset)
             FIT_eval_transfer(dt, dvs, im.rgba, vri.n_fits,
                     vri.fits, vri.field_table_ids, vri.grey_opacity)
+            if (im.rgba[0] > 1e-4 or im.rgba[1] > 1e-4 or \
+                im.rgba[2] > 1e-4) and enter_t < im.zt:
+                im.zt = enter_t
             for j in range(3):
                 dp[j] += ds[j]
 

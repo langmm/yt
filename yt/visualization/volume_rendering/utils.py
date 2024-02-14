@@ -77,6 +77,7 @@ def new_volume_render_sampler(camera, render_source):
         kwargs["camera_data"] = params["camera_data"]
     if render_source.zbuffer is not None:
         kwargs["zbuffer"] = render_source.zbuffer.z
+        kwargs["zbuffer_transparent"] = render_source.zbuffer.z_transparent
         args[4][:] = np.reshape(
             render_source.zbuffer.rgba[:],
             (camera.resolution[0], camera.resolution[1], 4),
