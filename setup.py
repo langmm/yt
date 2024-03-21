@@ -10,6 +10,7 @@ from setupext import (
     check_CPP14_flags,
     check_for_openmp,
     check_for_pyembree,
+    check_for_openexr,
     create_build_ext,
     install_ccompiler,
 )
@@ -72,6 +73,10 @@ lib_exts = [
 embree_libs, embree_aliases = check_for_pyembree(std_libs)
 cythonize_aliases.update(embree_aliases)
 lib_exts += embree_libs
+
+openexr_libs, openexr_aliases = check_for_openexr(std_libs)
+cythonize_aliases.update(openexr_aliases)
+lib_exts += openexr_libs
 
 # This overrides using lib_exts, so it has to happen after lib_exts is fully defined
 build_ext, sdist = create_build_ext(lib_exts, cythonize_aliases)

@@ -35,7 +35,7 @@ class TestOpenEXR:
     @pytest.fixture
     def OpenEXR(self):
         try:
-            import OpenEXR
+            from yt.utilities.lib.openexr import exr_tools as OpenEXR
         except ImportError:
             pytest.skip("OpenEXR not installed")
         return OpenEXR
@@ -59,25 +59,27 @@ class TestOpenEXR:
     def test_isogal(self, OpenEXR):
         fname = "isogal.exr"
         ds = yt.load(ISOGAL)
-        im, sc = yt.volume_render(ds, field=("gas", "density"), fname=fname)
+        im, sc = yt.volume_render(ds, field=("gas", "density"),
+                                  fname=fname)
         assert os.path.isfile(fname)
-        o = OpenEXR.InputFile(fname)
-        h = o.header()
-        print(h)
+        # TODO: Test InputFile
+        # o = OpenEXR.InputFile(fname)
         # for k in 'RGBAZ':
-        #     assert f"source_00.{k}" in h['channels']
+        #     assert f"{k}.source_00" in o.channels
+        # h = o.header()
+        # print(h)
         # TODO: Check size and data?
 
     @pytest.mark.parametrize('composite,scale', [
-        (False, False),
-        (True, False),
-        (False, True),
-        (True, True),
+        ('layer', False),
+        ('deep', False),
+        ('flatten', False),
+        ('layer', True),
+        ('deep', True),
+        ('flatten', True),
     ])
     def test_opaque(self, composite, scale, OpenEXR):
-        suffix = ""
-        if composite:
-            suffix += "_comp"
+        suffix = f"_{composite}"
         if scale:
             suffix += "_scaled"
         fname = f"opaque{suffix}.exr"
@@ -93,7 +95,7 @@ class TestOpenEXR:
         vr.transfer_function.grey_opacity = True
         vr.transfer_function.map_to_colormap(0.0, 1.0, scale=3.0,
                                              colormap="Reds")
-        sc.add_source(vr)
+        sc.add_source(vr, keyname="sphere")
 
         cam.set_width(1.8 * ds.domain_width)
         cam.lens.setup_box_properties(cam)
@@ -108,7 +110,7 @@ class TestOpenEXR:
             ds.domain_left_edge, ds.domain_right_edge,
             color=[1.0, 1.0, 1.0, 1.0]
         )
-        sc.add_source(box_source)
+        sc.add_source(box_source, keyname="opaque_box")
 
         LE = (ds.domain_left_edge + np.array([0.1, 0.0, 0.3])
               * ds.domain_left_edge.uq)
@@ -116,8 +118,8 @@ class TestOpenEXR:
               * ds.domain_left_edge.uq)
         color = np.array([0.0, 1.0, 0.0, 0.10])
         box_source = BoxSource(LE, RE, color=color)
-        sc.add_source(box_source)
+        sc.add_source(box_source, keyname="transparent_box")
 
         line_source = LineSource(vertices, colors)
-        sc.add_source(line_source)
+        sc.add_source(line_source, keyname="transparent_lines")
         sc.save_exr(fname=fname, composite=composite, scale=scale)

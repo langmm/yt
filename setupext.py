@@ -321,6 +321,143 @@ def read_embree_location():
     return rd
 
 
+def check_for_openexr(std_libs):
+    openexr_libs = []
+    openexr_aliases = {}
+
+    try_root_dir = []
+    if in_conda_env():
+        try_root_dir.append(
+            os.path.dirname(os.path.dirname(sys.executable)))
+    rd = os.environ.get("OPENEXR_DIR")
+    if rd is not None:
+        try_root_dir.append(rd)
+    try:
+        rd = open("openexr.cfg").read().strip()
+        try_root_dir.append(rd)
+    except IOError:
+        pass
+    try_root_dir.append("/usr/local")
+    if _platform == "darwin":
+        try_root_dir.append("/opt/homebrew")
+
+    openexr_prefix = None
+    for rd in try_root_dir:
+        if openexr_prefix:
+            break
+        openexr_prefix = read_openexr_location(rd)
+    if not openexr_prefix:
+        return openexr_libs, openexr_aliases
+        
+    openexr_prefix = os.path.abspath(openexr_prefix)
+    openexr_inc_dir = os.path.join(openexr_prefix, "include")
+    openexr_lib_dir = os.path.join(openexr_prefix, "lib")
+
+    openexr_aliases["OPENEXR_INC_DIR"] = [
+        "yt/utilities/lib/",
+        openexr_inc_dir,
+        # Explicit subdirectores are equired because the OpenEXR headers
+        # do not use the directory prefix when including Imath headers
+        os.path.join(openexr_inc_dir, "OpenEXR"),
+        os.path.join(openexr_inc_dir, "Imath"),
+    ]
+    openexr_aliases["OPENEXR_LIB_DIR"] = [openexr_lib_dir]
+    openexr_aliases["OPENEXR_LIBS"] = std_libs + ["openexr"]
+    openexr_libs += ["yt/utilities/lib/openexr/*.pyx"]
+
+    if in_conda_env():
+        conda_basedir = os.path.dirname(os.path.dirname(sys.executable))
+        openexr_aliases["OPENEXR_INC_DIR"] += [
+            os.path.join(conda_basedir, "include"),
+            os.path.join(conda_basedir, "include", "Imath"),
+        ]
+        openexr_aliases["OPENEXR_LIB_DIR"].append(os.path.join(conda_basedir, "lib"))
+
+    return openexr_libs, openexr_aliases
+
+
+def read_openexr_location(rd):
+    """
+
+    Attempts to locate the OpenEXR installation. First, we check for an
+    OPENEXR_DIR environment variable. If one is not defined, we look for
+    an openexr.cfg file in the root yt source directory. Finally, if that
+    is not present, we default to /usr/local. If OpenEXR is installed in a
+    non-standard location and none of the above are set, the compile will
+    not succeed. This only gets called if check_for_openexr() returns
+    something other than None.
+
+    """
+
+    fail_msg = (
+        "I attempted to find OpenEXR headers in %s. \n"
+        "If this is not correct, please set your correct OpenEXR location \n"
+        "using OPENEXR_DIR environment variable or your openexr.cfg file. \n"
+        "Please see http://yt-project.org/docs/dev/visualizing/unstructured_mesh_rendering.html "
+        "for more information. \n" % rd
+    )
+
+    # Create a temporary directory
+    tmpdir = tempfile.mkdtemp()
+    curdir = os.getcwd()
+
+    try:
+        os.chdir(tmpdir)
+
+        # Get compiler invocation
+        compiler = os.getenv("CXX", "c++")
+        compiler = compiler.split(" ")
+
+        # Attempt to compile a test script.
+        filename = r"test.cpp"
+        file = open(filename, "wt", 1)
+        CCODE = dedent("""\
+            #include "OpenEXR/ImfArray.h"
+            #include "OpenEXR/ImfHeader.h"
+            #include "Imath/ImathBox.h"
+            int main() {
+                return 0;
+            }"""
+        )
+        file.write(CCODE)
+        file.flush()
+        p = Popen(
+            compiler + ["-I%s/include/" % rd,
+                        "-I%s/include/Imath" % rd,
+                        filename],
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=PIPE,
+        )
+        output, err = p.communicate()
+        exit_code = p.returncode
+
+        if exit_code != 0:
+            log.warning(
+                "I could not compile OpenEXR test code."
+            )
+            log.warning("The error message was: ")
+            log.warning(err)
+            log.warning(fail_msg)
+
+        # Clean up
+        file.close()
+
+    except OSError:
+        log.warning(
+            "read_openexr_location() could not find your C compiler. "
+            "Attempted to use '%s'.",
+            compiler,
+        )
+        return False
+
+    finally:
+        os.chdir(curdir)
+        shutil.rmtree(tmpdir)
+
+    return rd
+
+
 def get_cpu_count():
     if platform.system() == "Windows":
         return 0

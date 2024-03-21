@@ -589,8 +589,11 @@ class Scene:
         camera=None,
         sigma_clip: Optional[float] = None,
         channels: Optional[list[str]] = None,
-        composite: Optional[bool] = False,
+        composite: Optional[str] = "layer",
         scale: Optional[bool] = False,
+        base_layer: Optional[str] = None,
+        sampling_depths: Optional[list[float]] = None,
+        sampling_rate: Optional[int] = 1
     ):
         r"""Saves sources in the Scene to an OpenEXR file with
         samples for each source in the desired channels.
@@ -616,7 +619,18 @@ class Scene:
         channels: sequence of strings, optional
             Names of fields that should be written out as channels. If
             not provided, R, G, B, A, & Z (depth) will be written.
-        composite: bool, optional
+        composite: str, optional
+            Method that should be used to add sources to the image.
+                'layer'   - One layer is added for each source resulting
+                            in additional channels for each layer with
+                            names generated according to
+                            '{channel}.{layer}' (e.g. R.triangle is the
+                            'R' channel for the 'triangle' layer)
+                'deep'    - A deep image is created where samples are
+                            created for each source contributing to a
+                            pixel in the image.
+                'flatten' - All sources are merged into a single flat
+                            image using the yt renderer.
             If True, the composite image for all sources in the scene
             will be saved. If False (the default), sources will be
             added as separate channels in the image.
@@ -624,73 +638,88 @@ class Scene:
             If True, the image values in each channel will be scaled to
             0-255. If False (the default), the raw channel data will be
             returned.
+        base_layer: string, optional
+            Name of the source that should be treated as the base layer
+            in a layered image. If not provided, the first source will
+            be used.
+        sampling_depths: list, optional
+            List of depths at which the volume should be sampled along
+            the line of sight by clipping the maximum distance that
+            contributes to the image. If not provided, sampling_rate
+            will be used to determine the sampling depths.
+        sampling_rate: int, optional
+            Number of times the volume should be sampled. If not provided
+            a single sample will be made with the entire volume
+            contributing to the image.
 
         """
         from yt.visualization.exr_writer import OpenEXRCanvas
         if camera is None:
             camera = self.camera
-        if channels is None:
-            channels = ['R', 'G', 'B', 'A', 'Z']
-        # TODO:
-        # - User supplied set of channels to output?
-        # - Is this the correct depth of sources?
         empty = camera.lens.new_image(camera)
-        exr = OpenEXRCanvas(empty.shape[:2])
+        layers = []
+        max_nsamples = 1
+        if composite == 'layer':
+            layers = list(self.sources.keys())
+        elif composite == 'deep':
+            max_nsamples = len(self.sources)
+        elif composite != 'flatten':
+            raise ValueError(f"Invalid composite value '{composite}'. "
+                             f"Valid values include 'layer', 'deep', "
+                             f"and 'flatten'")
+        if not sampling_depths:
+            sampling_depths = [np.inf]
+            # TODO: Add evenly spaced samples
+        if composite == 'deep' and len(sampling_depths) > 1:
+            raise ValueError(f"composite of '{composite}' cannot be "
+                             f"combined with multiple sampling depths")
+        elif composite != 'deep':
+            max_nsamples = len(sampling_depths)
+        exr = OpenEXRCanvas(fname, empty.shape[:2], channels=channels,
+                            layers=layers, base_layer=base_layer,
+                            scale=scale, sigma_clip=sigma_clip,
+                            max_nsamples=max_nsamples)
         kws = {}
 
-        def add_channels(im, z, prefix=""):
-            if scale:
-                max_z = 1.0
-                z_mask = (z != np.inf)
-                if sigma_clip is not None:
-                    max_im = im._clipping_value(sigma_clip)
-                    if z_mask.any():
-                        max_z = max(z[z_mask].max(), 1.0)
+        idepth = 0
+        for idepth, depth in enumerate(sampling_depths):
+            isrc = 0
+            
+            def new_zbuffer():
+                empty = camera.lens.new_image(camera)
+                z = np.empty(empty.shape[:2], dtype="float64")
+                z[:] = depth
+                return ZBuffer(empty, z)
+
+            if composite == 'flatten':
+                kws['zbuffer'] = new_zbuffer()
+            for k, source in self.opaque_sources:
+                if composite != 'flatten':
+                    kws['zbuffer'] = new_zbuffer()
+                source.render(camera, **kws)
+                im = source.zbuffer.rgba
+                z = source.zbuffer.z_transparent
+                if composite != 'flatten':
+                    layer = k if (composite == 'layer') else ""
+                    sample = isrc if (composite == 'deep') else idepth
+                    exr.add_channels(im, z, layer=layer, sample=sample)
+                isrc += 1
+            for k, source in self.transparent_sources:
+                if composite != 'flatten':
+                    kws['zbuffer'] = new_zbuffer()
+                im = source.render(camera, **kws)
+                z = source.sampler.azbuffer_transparent
+                if composite == 'flatten':
+                    kws['zbuffer'].rgba = im
                 else:
-                    max_im = im[:, :, :3].max()
-                    if z_mask.any():
-                        max_z = max(z[z_mask].max(), 1.0)
-                alpha = im[:, :, 3]
-                im = im[:, :, :3]
-                if max_im != 0:
-                    im = np.clip(im[:, :, :3] / max_im, 0.0, 1.0)
-                if max_z != 0:
-                    z = np.clip(z / max_z, 0.0, 1.0)
-                im = np.concatenate([im, alpha[..., None]], axis=-1)
-            for i, name in enumerate("RGBA"):
-                exr.add_channel(f"{prefix}{name}", im[:, :, i])
-            exr.add_channel(f"{prefix}Z", z)
-
-        def new_zbuffer():
-            empty = camera.lens.new_image(camera)
-            z = np.empty(empty.shape[:2], dtype="float64")
-            z[:] = np.inf
-            return ZBuffer(empty, z)
-
-        if composite:
-            kws['zbuffer'] = new_zbuffer()
-        for k, source in self.opaque_sources:
-            if not composite:
-                kws['zbuffer'] = new_zbuffer()
-            source.render(camera, **kws)
-            im = source.zbuffer.rgba
-            z = source.zbuffer.z_transparent
-            if not composite:
-                add_channels(im, z, prefix=f"{k}.")
-        for k, source in self.transparent_sources:
-            if not composite:
-                kws['zbuffer'] = new_zbuffer()
-            im = source.render(camera, **kws)
-            z = source.sampler.azbuffer_transparent
-            if composite:
-                kws['zbuffer'].rgba = im
-            else:
-                add_channels(im, z, prefix=f"{k}.")
-        if composite:
-            im = kws['zbuffer'].rgba
-            z = kws['zbuffer'].z_transparent
-            add_channels(im, z)
-        exr.write(fname)
+                    layer = k if (composite == 'layer') else ""
+                    sample = isrc if (composite == 'deep') else idepth
+                    exr.add_channels(im, z, layer=layer, sample=sample)
+                isrc += 1
+            if composite == 'flatten':
+                im = kws['zbuffer'].rgba
+                z = kws['zbuffer'].z_transparent
+                exr.add_channels(im, z, sample=idepth)
 
     def composite(self, camera=None):
         r"""Create a composite image of the current scene.
